@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ScatterChart, Scatter, ZAxis, LineChart, Line, Cell, ReferenceLine, AreaChart, Area, PieChart, Pie } from "recharts";
 
 // ─── COLORS ──────────────────────────────────────────────────────────────────
@@ -69,15 +69,88 @@ const ThresholdLabel = ({ viewBox }) => {
   );
 };
 
+// ─── CHART UTILITIES ─────────────────────────────────────────────────────────
+
+function downloadChartPNG(containerEl, title) {
+  const svg = containerEl?.querySelector("svg");
+  if (!svg) return;
+  const { width: w, height: h } = svg.getBoundingClientRect();
+  const clone = svg.cloneNode(true);
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  clone.setAttribute("width", w);
+  clone.setAttribute("height", h);
+  const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  bg.setAttribute("width", "100%"); bg.setAttribute("height", "100%"); bg.setAttribute("fill", C.card);
+  clone.insertBefore(bg, clone.firstChild);
+  const svgStr = new XMLSerializer().serializeToString(clone);
+  const url = URL.createObjectURL(new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" }));
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = w * 2; canvas.height = h * 2;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(2, 2); ctx.fillStyle = C.card; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(blob => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = `${title || "chart"}.png`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }, "image/png");
+  };
+  img.src = url;
+}
+
+async function shareChart(title, showToast) {
+  const url = window.location.href;
+  if (navigator.share) {
+    try { await navigator.share({ title: `AIBA – ${title}`, url }); } catch (_) {}
+  } else {
+    try { await navigator.clipboard.writeText(url); showToast("Link copied!"); }
+    catch (_) { showToast("Copy URL from address bar"); }
+  }
+}
+
+function ChartActions({ containerRef, title }) {
+  const [toast, setToast] = useState("");
+  const show = msg => { setToast(msg); setTimeout(() => setToast(""), 2000); };
+  const btn = {
+    background: "none", border: `1px solid ${C.border}`, borderRadius: 6,
+    padding: "3px 9px", cursor: "pointer", color: C.textMuted, fontSize: 10.5,
+    display: "flex", alignItems: "center", gap: 3, transition: "all 0.2s", flexShrink: 0,
+  };
+  const hov = e => { e.currentTarget.style.borderColor = C.gold; e.currentTarget.style.color = C.gold; };
+  const unv = e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.color = C.textMuted; };
+  return (
+    <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+      {toast && <span style={{ background: C.gold, color: C.bg, fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 5 }}>{toast}</span>}
+      <button style={btn} onMouseEnter={hov} onMouseLeave={unv} title="Download PNG"
+        onClick={() => { downloadChartPNG(containerRef.current, title); show("Saved!"); }}>↓ PNG</button>
+      <button style={btn} onMouseEnter={hov} onMouseLeave={unv} title="Share"
+        onClick={() => shareChart(title, show)}>↗ Share</button>
+    </div>
+  );
+}
+
 // ─── REUSABLE WRAPPERS ───────────────────────────────────────────────────────
 
-const VizCard = ({ children, title, subtitle }) => (
-  <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "22px 18px 14px", height: "100%" }}>
-    {title && <h3 style={{ color: C.text, fontSize: 15, fontWeight: 700, marginBottom: 2, lineHeight: 1.3 }}>{title}</h3>}
-    {subtitle && <p style={{ color: C.textDim, fontSize: 11, marginBottom: 14 }}>{subtitle}</p>}
-    {children}
-  </div>
-);
+function VizCard({ children, title, subtitle }) {
+  const ref = useRef(null);
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "22px 18px 14px", height: "100%" }}>
+      {title && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 2 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h3 style={{ color: C.text, fontSize: 15, fontWeight: 700, lineHeight: 1.3 }}>{title}</h3>
+            {subtitle && <p style={{ color: C.textDim, fontSize: 11, marginBottom: 14, marginTop: 2 }}>{subtitle}</p>}
+          </div>
+          <ChartActions containerRef={ref} title={title} />
+        </div>
+      )}
+      {!title && subtitle && <p style={{ color: C.textDim, fontSize: 11, marginBottom: 14 }}>{subtitle}</p>}
+      <div ref={ref}>{children}</div>
+    </div>
+  );
+}
 
 const Prose = ({ title, children }) => (
   <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", padding: "8px 0" }}>
@@ -92,13 +165,21 @@ const VizRow = ({ children, flip }) => (
   </div>
 );
 
-const BigViz = ({ children, title, subtitle }) => (
-  <div style={{ marginBottom: 44 }}>
-    {title && <h3 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 20, color: C.text, marginBottom: 4 }}>{title}</h3>}
-    {subtitle && <p style={{ color: C.textMuted, fontSize: 12, marginBottom: 18 }}>{subtitle}</p>}
-    <VizCard>{children}</VizCard>
-  </div>
-);
+function BigViz({ children, title, subtitle }) {
+  const ref = useRef(null);
+  return (
+    <div style={{ marginBottom: 44 }}>
+      {title && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <h3 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 20, color: C.text }}>{title}</h3>
+          <ChartActions containerRef={ref} title={title} />
+        </div>
+      )}
+      {subtitle && <p style={{ color: C.textMuted, fontSize: 12, marginBottom: 18 }}>{subtitle}</p>}
+      <div ref={ref}><VizCard>{children}</VizCard></div>
+    </div>
+  );
+}
 
 // ─── NAV ─────────────────────────────────────────────────────────────────────
 
@@ -132,8 +213,9 @@ const Nav = ({ page, setPage }) => (
 // ─── HOME PAGE ──────────────────────────────────────────────────────────────
 // ═════════════════════════════════════════════════════════════════════════════
 
-const HomePage = ({ setPage, setBenchmark }) => {
+const HomePage = ({ setPage, setBenchmark, visitors }) => {
   const top = overallBiasData[0], bot = overallBiasData[overallBiasData.length - 1];
+  const overallRef = useRef(null);
   return (
     <div>
       <section style={{ padding: "68px 32px 48px", textAlign: "center", position: "relative", overflow: "hidden" }}>
@@ -152,15 +234,19 @@ const HomePage = ({ setPage, setBenchmark }) => {
           <div style={{ display: "flex", gap: 22 }}>
             <div style={{ textAlign: "center" }}><p style={{ color: C.gold, fontSize: 24, fontWeight: 800 }}>11</p><p style={{ color: C.textDim, fontSize: 10 }}>Models</p></div>
             <div style={{ textAlign: "center" }}><p style={{ color: C.gold, fontSize: 24, fontWeight: 800 }}>6</p><p style={{ color: C.textDim, fontSize: 10 }}>Domains</p></div>
+            {visitors > 0 && <div style={{ textAlign: "center" }}><p style={{ color: C.gold, fontSize: 24, fontWeight: 800 }}>{visitors.toLocaleString()}</p><p style={{ color: C.textDim, fontSize: 10 }}>Visitors</p></div>}
           </div>
         </div>
       </section>
 
       {/* OVERALL CHART — FIX #1: visible threshold label */}
       <section style={{ maxWidth: 1280, margin: "0 auto", padding: "0 32px 52px" }}>
-        <h2 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 24, color: C.text, marginBottom: 5 }}>Overall Fairness Scores</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+          <h2 style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: 24, color: C.text }}>Overall Fairness Scores</h2>
+          <ChartActions containerRef={overallRef} title="Overall Fairness Scores" />
+        </div>
         <p style={{ color: C.textMuted, fontSize: 13, marginBottom: 24 }}>Composite bias scores across all benchmarks — higher is fairer</p>
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "28px 16px 16px" }}>
+        <div ref={overallRef} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "28px 16px 16px" }}>
           <ResponsiveContainer width="100%" height={480}>
             <BarChart data={overallBiasData} layout="vertical" margin={{ left: 8, right: 24, top: 40, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} horizontal={false} />
@@ -629,7 +715,18 @@ function sc(s) { return s >= 70 ? C.green : s >= 55 ? C.orange : C.red; }
 export default function App() {
   const [page, setPage] = useState("home");
   const [bid, setBid] = useState("gender");
+  const [visitors, setVisitors] = useState(0);
   useEffect(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, [page, bid]);
+  useEffect(() => {
+    const SEED = 1247;
+    let count = parseInt(localStorage.getItem("aiba_visitors") || SEED, 10);
+    if (!sessionStorage.getItem("aiba_session")) {
+      count += 1;
+      localStorage.setItem("aiba_visitors", count);
+      sessionStorage.setItem("aiba_session", "1");
+    }
+    setVisitors(count);
+  }, []);
   const go = id => { setBid(id); setPage("benchmark"); };
 
   return (
@@ -646,7 +743,7 @@ export default function App() {
         .recharts-default-legend { margin-top: 4px !important; }
       `}</style>
       <Nav page={page} setPage={setPage} />
-      {{ home: <HomePage setPage={setPage} setBenchmark={go} />, benchmark: <BenchmarkPage benchmarkId={bid} setBenchmark={setBid} />, compare: <ComparePage />, about: <AboutPage />, publications: <PublicationsPage />, evaluate: <EvaluatePage />, donate: <DonatePage /> }[page] || <HomePage setPage={setPage} setBenchmark={go} />}
+      {{ home: <HomePage setPage={setPage} setBenchmark={go} visitors={visitors} />, benchmark: <BenchmarkPage benchmarkId={bid} setBenchmark={setBid} />, compare: <ComparePage />, about: <AboutPage />, publications: <PublicationsPage />, evaluate: <EvaluatePage />, donate: <DonatePage /> }[page] || <HomePage setPage={setPage} setBenchmark={go} />}
       <footer style={{ borderTop: `1px solid ${C.border}`, padding: 24, textAlign: "center", marginTop: 28 }}>
         <p style={{ color: C.textDim, fontSize: 11.5 }}>AI Bias Atlas — <span style={{ color: C.gold, fontStyle: "italic" }}>See what AI overlooks.</span> | <a href="https://aibias.org" style={{ color: C.textMuted, textDecoration: "none" }}>aibias.org</a></p>
         <p style={{ color: C.textDim, fontSize: 10, marginTop: 5 }}>Data freely available under open licenses. Built for researchers, journalists, regulators, and the public.</p>
